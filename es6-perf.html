@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Impact of ES6 on runtime performance</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <style type="text/css">
+
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Playfair+Display);
+
+      body {
+          font-family: 'Playfair Display', serif;
+          color: #4c061d;
+      }
+      h1, h2, h3 {
+          font-weight: normal;
+          color: #3b3923;
+      }
+      .italic {
+          font-style: italic;
+      }
+      .remark-slide-content {
+          background-color: #b4c292;
+      }
+      .remark-code, .remark-inline-code {
+          font-family: 'Ubuntu Mono';
+          font-size: 1.4em;
+      }
+      .link a {
+          text-decoration: none;
+          color: #4c061d;
+      }
+    </style>
+  </head>
+  <body>
+    <textarea id="source" rows="100%" cols="100%">
+
+class: center, middle
+
+# ES6 & performances
+
+### How does ES6 impact performance
+
+---
+
+class: middle, center
+
+# Once upon a time... ES6!
+
+???
+
+ES6 brings a lot of solutions to a few classical JavaScript problems. However,
+these solutions also bring some overhead cost with them. What are these?
+
+---
+
+# Arrow functions: the problem
+
+```javascript
+function Cat() {
+    this.energy = 10;
+    setTimeout(function() {
+        console.log("I'm going to nap");
+        this.energy += 10;
+    }, 1000 * 60 * 60);
+}
+Cat.prototype.talk = function() {
+    this.energy -= 1;
+    console.log('mew');
+}
+```
+
+---
+
+# Arrow functions: the solution
+
+```javascript
+function Cat() {
+    this.energy = 10;
+*   setTimeout(() => {
+        console.log("I'm going to nap");
+        this.energy += 10;
+    }, 1000 * 60 * 60);
+}
+```
+
+???
+
+Binds this to the this value enclosing the declaration of the arrow function.
+Problem solved!
+
+So, should we use arrow functions all the time? Even in cases where the this
+isn't actually used? After all, arrow functions are slightly shorter to write
+than non-arrows...
+
+---
+
+# Beware the `this` binding
+
+```javascript
+function Cat() {
+    this.energy = 10;
+*   let _this = this;
+    setTimeout(function() {
+        console.log("I'm going to nap");
+*       _this.energy += 10;
+    }, 1000 * 60 * 60);
+}
+```
+
+???
+
+This is one way we could have solved the problem without ES6. This is actually
+what a JavaScript engine would perform, under the hood, for ES6 arrow
+functions.
+
+We now have one variable in the function scope, which is the this value! It has
+to be remembered even if this isn't directly used in the arrow function (it
+could be transitively used).
+
+---
+
+# Arrow functions in a nutshell
+
+- Be mindful of this (pun intended) when using arrow functions.
+    - there is a memory cost!
+- Don't stop using arrow functions because of the this array binding
+    - unless you know you'll have really plenty of them.
+
+---
+
+# Next topic: block scoping (`let`, `const`)
+
+```javascript
+// high performant jquery in a one liner
+var $ = document.querySelector.bind(document);
+
+function bindButtons() {
+    for (var i = 0; i < 5; i++)
+        $('#button' + i).click = function() {
+            alert('you clicked ' + i);
+        }
+}
+```
+
+???
+
+>
+
+---
+
+class: middle, center
+
+![](./let-alert.png)
+
+---
+
+# Equivalent to
+
+```javascript
+function bindButtons() {
+*    var i;
+*    for (i = 0; i < 5; i++)
+        $('#button' + i).click = function() {
+            alert('you clicked ' + i);
+        }
+}
+```
+
+???
+
+>
+
+---
+
+# `let` to the rescue!
+
+```
+function bindButtons() {
+*for (let i = 0; i < 5; i++)
+    $('#button' + i).click = function() {
+        alert('you clicked ' + i);
+    }
+}
+```
+
+???
+
+>
+
+So, what's the deal with let/const?
+
+---
+
+class: middle, center
+
+# TEMPORAL DEAD ZONE
+
+### (note, this is not an horror movie name)
+
+???
+
+`var` variables are hoisted by the VM, which means they can't be declared after
+their first use in a function (as the declaration gets hoisted anyways).
+
+`let` and `const` variables are not hoisted. Until a `let` bound variable is
+not declared, it can't be used. The VM adds some runtime checks for that
+(because static inference couldn't figure out, remember, it's still JS).
+
+---
+
+# Example of a TDZ violation
+
+```javascript
+function f(x) {
+    if (x < 30) {
+        return x;
+    }
+    if (x > 40) {
+*       y = x - 25; // TDZ violation
+    }
+    let y;
+    return f(y);
+}
+
+f(42);
+```
+
+---
+
+# What does the VM do?
+
+```javascript
+function f(x) {
+    if (x < 30) {
+        return x;
+    }
+    if (x > 40) {
+*       if (!%IsDeclared(y))
+*           throw ReferenceError('...');
+        y = x - 25;
+    }
+    let y;
+*   if (!%IsDeclared(y))
+*       throw ReferenceError('...');
+    return f(y); // TDZ violation for y == 42
+}
+
+f(42);
+```
+
+???
+
+Runtime checks are inserted for each use of variables declared by `let`. Can be
+expensive!
+
+Fortunately, a JIT compiler can factor them out (by hoisting them), but it will
+still have a small cost.
+
+---
+
+# `let` in a nutshell
+
+- Runtime checks are inserted to ensure the variable is declared.
+- These checks can be hoisted by the JITs.
+- Advice: **always declare your let variables before they're used**.
+
+---
+
+# Next topic: `for of`
+
+```javascript
+var arr = ['mozilla', 'firefox', 'is',
+           'the', 'best'];
+var str = '';
+// Before
+for (var i = 0; i < 10; i++) {
+    console.log(arr[i]);
+    str += arr[i];
+}
+// After
+for (var val of arr) {
+    console.log(val);
+    str += val;
+}
+```
+
+???
+
+>
+
+---
+
+# `of` uses the Iterator pattern
+
+```javascript
+// After
+*var _iterator = arr[Symbol.iterator]();
+*var _itval = _iterator.next();
+// _itval has the keys {value: *, done: Boolean}
+*while (!_itval.done) {
+*   var val = _itval.value;
+    console.log(val);
+    str += val;
+*   _itval = _itval.next();
+}
+```
+
+???
+
+- There's an initial processing cost (finding the iterator an creating it).
+- for-of creates a new VM object (_itval) each time it calls .next() (memory
+cost).
+- fortunately, this could in theory be pattern-matched by VMs and optimized.
+
+---
+
+# What else uses the Iterator pattern?
+
+```javascript
+// Generators
+function* gen() {
+    yield 42;    // {value: 42,    done: false}
+    yield false; // {value: false, done: true}
+}
+var g = gen(); // g is an iterator
+
+// Destructuring assignments
+let [a, b, c, , d] = [1, 2, 3, 4, 5];
+```
+
+---
+
+# Next topic: how to do OOP in JS
+
+```javascript
+function Parent() { this.x = 42; }
+// How to instantiate?
+var p = Parent();       // ?
+var p = new Parent();   // ?
+// How to inherit?
+function Child() { ... }
+Child.prototype = Parent;           // ?
+Child.prototype = Parent.prototype; // ?
+Child.prototype = Parent();         // ?
+Child.prototype = new Parent;       // ?
+
+```
+
+---
+
+# How to call the parent function?
+
+```javascript
+var c = new Parent;
+c.prototype = Child.prototype;          // ?
+function Child() { Parent(); }          // ?
+function Child() { new Parent(); }      // ?
+function Child() { Parent.call(this); } // ?
+```
+
+---
+
+# Solution: `class` are `super`
+
+```javascript
+class Parent {
+    constructor() {
+        this.x = 42;
+    }
+}
+*class Child extends Parent {
+    constructor() {
+*       super();
+    }
+}
+```
+
+---
+
+class: middle, center
+
+# TEMPORAL DEAD ZONE 2
+
+### Revenge of the TC39
+
+---
+
+# Don't use `this` before calling `super`!
+
+```javascript
+class BadChild extends Parent {
+    constructor() {
+        console.log(this.x); // use of uninitialized `this`
+        this.y = 42;         // use of uninitialized `this`
+        super();
+    }
+}
+```
+
+---
+
+# Runtime checks, again
+
+```javascript
+class BadChild extends Parent {
+    constructor() {
+*       if (!%HasCalledSuper())
+*           throw ReferenceError(...);
+        console.log(this.x); // use of uninitialized `this`
+*       if (!%HasCalledSuper())
+*           throw ReferenceError(...);
+        this.y = 42;         // use of uninitialized `this`
+        super();
+    }
+}
+```
+
+---
+
+# TL;DR
+
+- Each feature can bring some slowdown, if it's badly used.
+- Fortunately, the JIT can optimize them all!
+- **Don't stop using ES6 when it is slower than ES5**.
+- And if it is slower, let us know!
+
+---
+
+class: middle, center
+
+# Thank you
+
+## .link[[@bnjbvr](https://twitter.com/bnjbvr)]
+
+???
+Comments
+
+    </textarea>
+    <script src="https://gnab.github.io/remark/downloads/remark-latest.min.js">
+    </script>
+    <script>
+var slideshow = remark.create({
+    highlightLanguage: "javascript",
+    highlightLines: true
+});
+    </script>
+  </body>
+</html>
