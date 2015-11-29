@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Gestion des erreurs avec les promesses</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <style type="text/css">
+
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Playfair+Display);
+
+      body {
+          font-family: 'Playfair Display', serif;
+          color: #4983ff;
+      }
+      .remark-slide-content {
+        background-color: #f5dd90;
+      }
+      h1, h2, h3 {
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code {
+        font-family: 'Ubuntu Mono';
+        font-size: 1.4em;
+        color: #498388;
+      }
+      .italic { font-style: italic; }
+      .link a {
+          text-decoration: none;
+          color: #3983aa;
+      }
+      .unpeuplusgros {
+          font-size: 1.4em;
+      }
+    </style>
+  </head>
+  <body>
+    <textarea id="source" rows="100%" cols="100%">
+
+class: center, middle
+
+# Promises, await, errors
+
+### Catch me if you can!
+
+---
+
+# Avant, on avait ça...
+
+```
+/* cb(maybeError, maybeResult); */
+function asyncRandom(n, cb) {
+    setTimeout(() => {
+        if (Math.random() > .5)
+            return cb(null, Math.random() * n);
+        cb("Je ne veux pas travailler, etc");
+    });
+}
+asyncRandom(42, (err, r) => {
+    if (err)
+        return console.error(err);
+    asyncRandom(r, (err2, r2) =>  {
+        if (err2)
+            return console.error(err2);
+        console.log('callback hell yeah', r2);
+    });
+});
+```
+
+---
+
+# Maintenant on a ça !
+
+```
+function asyncRandom(n) {
+
+	return new Promise((fulfill, reject) => {
+        setTimeout(() => {
+
+          if (Math.random() > .5)
+      		return fulfill(Math.random() * n);
+
+          reject("Je ne veux pas travailler, etc.");
+
+        }, 1000);
+    });
+}
+```
+
+???
+
+La fonction passée au ctor de promise est appelée "executor".
+
+---
+
+# Code appelant
+
+```
+let p = new asyncRandom(42);
+p.then(r => new asyncRandom(r))
+ .then(r => {
+    console.log('yup', r);
+  });
+```
+
+???
+
+.then renvoie une nouvelle Promise!
+
+Okay, mais comment gère-t-on les erreurs ?
+
+---
+
+# .then(onFulfill, onReject);
+
+```
+let p = new asyncRandom(42);
+p.then(
+	r => new asyncRandom(r),
+*   err => { console.log('oh noes!', err); }
+).then(
+	r => { console.log('yup', r); },
+*   console.log.bind(console)
+);
+```
+
+???
+
+Bien, mais d'ou vient l'erreur ?
+
+---
+
+# #1: Reject Error-s
+
+```
+function asyncRandom(n) {
+
+	return new Promise((fulfill, reject) => {
+        setTimeout(() => {
+
+          if (Math.random() > .5)
+      		return fulfill(Math.random() * n);
+
+          reject(
+*           new Error("Je ne veux pas travailler")
+          );
+
+        }, 1000);
+    });
+}
+```
+
+???
+
+Comme ça le handler peut avoir accès à .stack, .message, etc.
+
+---
+
+# 'throw' in executor
+
+```
+function asyncRandom(n) {
+
+	return new Promise((fulfill, reject) => {
+        setTimeout(() => {
+
+          if (Math.random() > .5)
+      		return fulfill(Math.random() * n);
+
+*         throw new Error("Je ne veux pas.");
+
+        }, 1000);
+    });
+}
+```
+
+???
+
+Le "onReject" handler attrape les erreurs synchrones (throw) ou asynchrones
+(via reject) qui viennent de l'exécution de la fonction "executor".
+
+---
+
+# L'erreur quand tout va bien
+
+```
+function GenericErrorHandler(err) {
+    console.log('an error occurred!',
+                err.stack,
+                err.message);
+}
+
+let p = new asyncRandom(42);
+p.then(
+	r => new asyncRandom(r),
+    GenericErrorHandler
+).then(
+	r => { console.fog('yup', r); },
+    GenericErrorHandler
+);
+```
+
+???
+
+Qu'est ce que ça affiche à votre avis ?
+
+Rien du tout.
+
+Pourquoi ? Il y a une faute dans le onFulfill de la dernière promise.
+La promise renvoyée n'est pas traitée (elle n'a ni fulfill ni reject), donc par
+défaut, l'erreur invoquée reste silencieuse.
+
+Je vais vous le redire pour que ça reste bien ancré dans vos esprits :)
+
+---
+
+class: middle, center, italic
+
+# Les erreurs pas traitées de manière explicite restent silencieuses !
+
+---
+
+# #2: .catch en fin de chaîne
+
+```
+// .catch(Handler) === .then(null, Handler);
+
+let p = new asyncRandom(42);
+p.then(
+	r => new asyncRandom(r),
+    GenericErrorHandler
+).then(
+	r => { console.fog('yup', r); },
+    GenericErrorHandler
+*).catch(err => {
+*	console.log('Error in last fulfill/reject:',
+*                err.message);
+*});
+```
+
+???
+
+.catch récupère les erreurs provoquées par les erreurs synchrones ou
+asynchrones de la Promise précédente OU de l'executor.
+
+Notez que .catch renvoie aussi une Promise, vu que c'est un alias pour .then.
+
+---
+
+# Les erreurs sont propagées
+
+```
+let p = new asyncRandom(42);
+p.then(r => { throw r })
+ .then(r => { console.log('yup', r); })
+ .catch(err => {
+	console.log('Error in promise/fulfill():',
+                err.message);
+ });
+```
+
+---
+
+class: middle, center
+
+# Quid d'async/await ?
+
+???
+
+Sucre syntaxique sur des Promises => même problématique.
+
+---
+
+class: middle, center, italic
+
+# Les erreurs pas traitées de manière explicite restent silencieuses !
+
+---
+
+# try/catch
+
+```
+// Le code d'asyncRandom ne change pas.
+
+try {
+    let r = await asyncRandom(42);
+    r = await asyncRandom(r);
+    console.log('yup', r);
+} catch(err) {
+    console.log('an error occurred!', err);
+}
+```
+
+???
+
+Sucre syntaxique pour .catch() => toutes les erreurs, même dans le code synchrone, sont attrapées.
+
+---
+
+# async/await et chaîne d'appels
+
+```
+// can throw!
+async function randomSquare() {
+    return (await asyncRandom(1)) *
+           (await asyncRandom(1));
+}
+
+console.log(await randomSquare());
+```
+
+---
+
+# #3: Toujours try/catch sur le dernier appel asynchrone
+
+```
+async function randomSquare() {
+    return (await asyncRandom(1)) *
+           (await asyncRandom(1));
+}
+
+try {
+    await randomSquare();
+} catch(err) {
+    console.log('an error occurred!', err);
+}
+```
+
+---
+
+class: unpeuplusgros
+
+# TL;DR
+
+- `.then` renvoie une nouvelle Promise.
+- `.catch(f)` équivaut à `.then(null, f)`.
+- `onReject` est appelé en cas d'erreur synchrone (`throw`) ou asynchrone
+(`reject`) dans l'executor ou le cas échéant, dans la Promise précédente.
+- pour `async/await`, `catch` attrape tout.
+
+---
+
+class: middle, center
+
+# Merci de votre attention
+
+## .link[[@bnjbvr](https://twitter.com/bnjbvr)]
+
+???
+
+Commentaires
+
+    </textarea>
+    <script src="https://gnab.github.io/remark/downloads/remark-latest.min.js">
+    </script>
+    <script>
+var slideshow = remark.create({
+    highlightLanguage: "javascript",
+    highlightLines: true
+});
+    </script>
+  </body>
+</html>
